@@ -167,10 +167,14 @@ SyslogIdentifier=argus-first-boot
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable argus-first-boot.service
-
-echo "First-boot automation configured"
+# Enable and reload systemd (if running)
+if systemctl is-system-running 2>/dev/null; then
+  systemctl daemon-reload
+  systemctl enable argus-first-boot.service
+  echo "First-boot automation configured and enabled"
+else
+  echo "First-boot automation configured (systemd not running, will enable on next boot)"
+fi
 echo
 
 # Summary
@@ -182,11 +186,17 @@ echo "Mothership: $MOTHERSHIP_ADDR"
 echo "Status: Ready to bootstrap"
 echo
 
-# Start first-boot
-echo "[5/5] Starting first-boot service..."
-systemctl start argus-first-boot.service &
+# Start first-boot (if systemd is running)
+echo "[5/5] Starting bootstrap..."
+if systemctl is-system-running 2>/dev/null; then
+  systemctl start argus-first-boot.service &
+  echo "First-boot service started"
+  echo "Check status with: journalctl -u argus-first-boot -f"
+else
+  echo "Systemd not running. Service will start on next boot."
+  echo "To start now manually: systemctl start argus-first-boot.service"
+fi
 
 echo
-echo "Bootstrap initiated. Check status with: journalctl -u argus-first-boot -f"
 echo "Node will join Tailscale, then wait for mothership setup commands."
 echo
