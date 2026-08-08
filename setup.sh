@@ -5,12 +5,11 @@
 
 set -euo pipefail
 
-TAILSCALE_KEY="${TAILSCALE_KEY:-}"
+TAILSCALE_KEY="${TAILSCALE_KEY:-${1:-}}"
 MOTHERSHIP_ADDR="${MOTHERSHIP_ADDR:-argus.soay-boa.ts.net:6379}"
 HOSTNAME_PREFIX="${HOSTNAME_PREFIX:-argus}"
 
 echo "=== Argus Node Bootstrap ==="
-echo "Tailscale Key: ${TAILSCALE_KEY:0:20}..."
 echo "Mothership: $MOTHERSHIP_ADDR"
 echo
 
@@ -27,11 +26,18 @@ if ! grep -qi debian /etc/os-release 2>/dev/null; then
   exit 1
 fi
 
+# Prompt for key if not provided
 if [[ -z "$TAILSCALE_KEY" ]]; then
-  echo "ERROR: TAILSCALE_KEY environment variable required"
-  echo "Usage: TAILSCALE_KEY=tskey-... ./setup.sh"
-  exit 1
+  echo
+  read -sp "Tailscale Auth Key (tskey-...): " TAILSCALE_KEY
+  echo
+  if [[ -z "$TAILSCALE_KEY" ]]; then
+    echo "ERROR: Tailscale key required"
+    exit 1
+  fi
 fi
+
+echo "Tailscale Key: ${TAILSCALE_KEY:0:20}..."
 
 # Check if already configured
 if systemctl is-enabled argus-first-boot.service 2>/dev/null; then

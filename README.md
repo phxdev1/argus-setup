@@ -4,15 +4,20 @@ Bootstrap any Linux machine into an autonomous argus mesh node.
 
 ## Quick Start
 
+**Interactive (prompts for key):**
 ```bash
-export TAILSCALE_KEY="tskey-auth-..."
-curl https://raw.githubusercontent.com/phxdev1/argus-setup/master/setup.sh | bash
+curl https://raw.githubusercontent.com/phxdev1/argus-setup/master/setup.sh | sudo bash
 ```
 
-Or with sudo:
-
+**With environment variable:**
 ```bash
-sudo TAILSCALE_KEY="tskey-auth-..." bash -c 'curl https://raw.githubusercontent.com/phxdev1/argus-setup/master/setup.sh | bash'
+export TAILSCALE_KEY="tskey-auth-..."
+curl https://raw.githubusercontent.com/phxdev1/argus-setup/master/setup.sh | sudo bash
+```
+
+**With argument:**
+```bash
+curl https://raw.githubusercontent.com/phxdev1/argus-setup/master/setup.sh | sudo bash /dev/stdin tskey-auth-...
 ```
 
 ## What It Does
