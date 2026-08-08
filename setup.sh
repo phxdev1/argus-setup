@@ -26,12 +26,6 @@ if ! grep -qi debian /etc/os-release 2>/dev/null; then
   exit 1
 fi
 
-if ! command -v systemctl &>/dev/null; then
-  echo "ERROR: systemd is required but not installed"
-  echo "Install with: apt-get install -y systemd"
-  exit 1
-fi
-
 # Prompt for key if not provided
 if [[ -z "$TAILSCALE_KEY" ]]; then
   echo
