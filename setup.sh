@@ -45,6 +45,12 @@ fi
 
 echo "Tailscale Key: ${TAILSCALE_KEY:0:20}..."
 
+# Ensure systemd is installed
+if ! command -v systemctl &>/dev/null; then
+  echo "Installing systemd..."
+  apt-get install -y -qq systemd
+fi
+
 # Check if already configured
 if systemctl is-enabled argus-first-boot.service 2>/dev/null; then
   echo "Node already configured. Remove /etc/systemd/system/argus-first-boot.service to reconfigure."
