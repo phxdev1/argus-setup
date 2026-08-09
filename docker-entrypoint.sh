@@ -50,10 +50,48 @@ if redis-cli -h "$MOTHERSHIP_HOST" -p "$MOTHERSHIP_PORT" ping 2>/dev/null | grep
   HOSTNAME=$(hostname)
   redis-cli -h "$MOTHERSHIP_HOST" -p "$MOTHERSHIP_PORT" LPUSH "argus:setup:pending" "$HOSTNAME" >/dev/null
   echo "[bootstrap] Signaled mothership: $HOSTNAME"
-  echo "[bootstrap] Node ready for work assignments"
+  echo "[bootstrap] Listening for setup commands..."
 
-  # Keep container alive
-  echo "[bootstrap] Listening for work commands..."
+  # Listen for setup commands from mothership
+  while true; do
+    # Check if status is "done"
+    STATUS=$(redis-cli -h "$MOTHERSHIP_HOST" -p "$MOTHERSHIP_PORT" GET "argus:setup:${HOSTNAME}:status" 2>/dev/null || echo "")
+    if [ "$STATUS" = "done" ]; then
+      echo "[bootstrap] Setup complete, entering work loop"
+      break
+    fi
+
+    # Poll for next command (blocking pop with timeout)
+    CMD=$(redis-cli -h "$MOTHERSHIP_HOST" -p "$MOTHERSHIP_PORT" BLPOP "argus:setup:${HOSTNAME}:commands" 5 2>/dev/null | tail -1)
+
+    if [ -n "$CMD" ]; then
+      echo "[setup] Executing: $CMD"
+
+      case "$CMD" in
+        clone-fleet)
+          mkdir -p /srv/argus
+          git clone https://github.com/phxdev1/argus-fleet.git /srv/argus/fleet 2>&1 && \
+          redis-cli -h "$MOTHERSHIP_HOST" -p "$MOTHERSHIP_PORT" LPUSH "argus:setup:${HOSTNAME}:results" "clone-fleet:ok" >/dev/null
+          ;;
+        install-tools)
+          if [ -d /srv/argus/fleet/bin ]; then
+            cp /srv/argus/fleet/bin/argus-* /usr/local/bin/ 2>/dev/null && \
+            chmod +x /usr/local/bin/argus-* && \
+            redis-cli -h "$MOTHERSHIP_HOST" -p "$MOTHERSHIP_PORT" LPUSH "argus:setup:${HOSTNAME}:results" "install-tools:ok" >/dev/null
+          fi
+          ;;
+        *)
+          echo "[setup] Unknown command: $CMD"
+          redis-cli -h "$MOTHERSHIP_HOST" -p "$MOTHERSHIP_PORT" LPUSH "argus:setup:${HOSTNAME}:results" "unknown:fail" >/dev/null
+          ;;
+      esac
+    fi
+  done
+
+  # Enter work loop
+  echo "[node] Ready for work assignments"
+  redis-cli -h "$MOTHERSHIP_HOST" -p "$MOTHERSHIP_PORT" LPUSH "argus:work:ready" "$HOSTNAME" >/dev/null
+  echo "[node] Listening for work commands..."
   while true; do sleep 60; done
 else
   echo "[bootstrap] WARNING: Cannot reach mothership at $MOTHERSHIP_ADDR"
