@@ -26,6 +26,15 @@ if ! grep -qi debian /etc/os-release 2>/dev/null; then
   exit 1
 fi
 
+# Check for basic utilities
+for cmd in apt-get curl sed; do
+  if ! command -v $cmd &>/dev/null; then
+    echo "ERROR: Required utility '$cmd' not found"
+    echo "This environment is too minimal. Use a standard Debian/Ubuntu image."
+    exit 1
+  fi
+done
+
 # Prompt for key if not provided
 if [[ -z "$TAILSCALE_KEY" ]]; then
   echo
