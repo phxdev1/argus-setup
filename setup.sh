@@ -42,6 +42,7 @@ echo "Tailscale Key: ${TAILSCALE_KEY:0:20}..."
 # Ensure systemd is installed
 if ! command -v systemctl &>/dev/null; then
   echo "Installing systemd..."
+  apt-get update -qq
   apt-get install -y -qq systemd
 fi
 
