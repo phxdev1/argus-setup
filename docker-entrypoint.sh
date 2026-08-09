@@ -45,6 +45,11 @@ MOTHERSHIP_PORT="${MOTHERSHIP_ADDR#*:}"
 
 if redis-cli -h "$MOTHERSHIP_HOST" -p "$MOTHERSHIP_PORT" ping 2>/dev/null | grep -q PONG; then
   echo "[bootstrap] Connected to mothership"
+
+  # Signal mothership: node is ready
+  HOSTNAME=$(hostname)
+  redis-cli -h "$MOTHERSHIP_HOST" -p "$MOTHERSHIP_PORT" LPUSH "argus:setup:pending" "$HOSTNAME" >/dev/null
+  echo "[bootstrap] Signaled mothership: $HOSTNAME"
   echo "[bootstrap] Node ready for work assignments"
 
   # Keep container alive
