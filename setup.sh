@@ -1,5 +1,6 @@
 #!/bin/bash
 # setup.sh - Bootstrap any Linux machine into an argus node
+# Supports: Alpine, Debian, Ubuntu, Raspberry Pi OS
 # Usage: curl https://raw.githubusercontent.com/phxdev1/argus-setup/master/setup.sh | bash
 # Or: TAILSCALE_KEY=... ./setup.sh
 
@@ -21,16 +22,28 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-if ! grep -qi debian /etc/os-release 2>/dev/null; then
-  echo "ERROR: This script requires a Debian-based system"
+# Detect Linux distribution
+if [[ -f /etc/alpine-release ]]; then
+  DISTRO="alpine"
+  PKG_MGR="apk"
+elif [[ -f /etc/debian_version ]]; then
+  DISTRO="debian"
+  PKG_MGR="apt"
+elif grep -qi "^ID=debian\|^ID=ubuntu" /etc/os-release 2>/dev/null; then
+  DISTRO="debian"
+  PKG_MGR="apt"
+else
+  echo "ERROR: Unsupported Linux distribution"
+  echo "Supported: Alpine, Debian, Ubuntu, Raspberry Pi OS"
   exit 1
 fi
 
+echo "Detected: $DISTRO ($PKG_MGR)"
+
 # Check for basic utilities
-for cmd in apt-get curl sed; do
+for cmd in curl sed; do
   if ! command -v $cmd &>/dev/null; then
     echo "ERROR: Required utility '$cmd' not found"
-    echo "This environment is too minimal. Use a standard Debian/Ubuntu image."
     exit 1
   fi
 done
@@ -47,38 +60,27 @@ if [[ -z "$TAILSCALE_KEY" ]]; then
 fi
 
 echo "Tailscale Key: ${TAILSCALE_KEY:0:20}..."
-
-# Ensure systemd is installed
-if ! command -v systemctl &>/dev/null; then
-  echo "Installing systemd..."
-  apt-get update -qq
-  apt-get install -y -qq systemd
-fi
-
-# Check if already configured
-if systemctl is-enabled argus-first-boot.service 2>/dev/null; then
-  echo "Node already configured. Remove /etc/systemd/system/argus-first-boot.service to reconfigure."
-  exit 0
-fi
-
 echo "Environment OK"
 echo
 
 # Install substrate
 echo "[2/5] Installing substrate (Tailscale + Redis)..."
 
-apt-get update -qq
-apt-get install -y -qq curl ca-certificates redis-tools
+if [[ "$PKG_MGR" == "apk" ]]; then
+  apk update
+  apk add --no-cache curl ca-certificates redis
+elif [[ "$PKG_MGR" == "apt" ]]; then
+  apt-get update -qq
+  apt-get install -y -qq curl ca-certificates redis-tools
+fi
 
 # Install Tailscale
 if ! command -v tailscale &>/dev/null; then
-  curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1 || {
-    # Fallback manual installation
-    curl -fsSL https://pkgs.tailscale.com/stable/debian/tailscale.asc | apt-key add -
-    echo "deb https://pkgs.tailscale.com/stable/debian $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/tailscale.list
-    apt-get update -qq
-    apt-get install -y -qq tailscale
-  }
+  if [[ "$DISTRO" == "alpine" ]]; then
+    apk add --no-cache tailscale
+  else
+    curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1
+  fi
 fi
 
 echo "Substrate installed"
@@ -110,7 +112,15 @@ echo "[first-boot] Starting bootstrap..."
 
 # Generate hostname
 HOSTNAME="${HOSTNAME_PREFIX}-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' ')"
-hostnamectl set-hostname "$HOSTNAME"
+
+# Set hostname (compatible with both systemd and non-systemd systems)
+if command -v hostnamectl &>/dev/null; then
+  hostnamectl set-hostname "$HOSTNAME"
+else
+  echo "$HOSTNAME" > /etc/hostname
+  hostname "$HOSTNAME" 2>/dev/null || true
+fi
+
 echo "[first-boot] Hostname: $HOSTNAME"
 
 # Join Tailscale
@@ -157,8 +167,44 @@ EOF
 
 chmod +x /usr/local/lib/argus/first-boot.sh
 
-# Create systemd service
-tee /etc/systemd/system/argus-first-boot.service > /dev/null << 'EOF'
+# Create init service based on distro
+echo "[3/5] Configuring first-boot automation..."
+
+if [[ "$DISTRO" == "alpine" ]]; then
+  # OpenRC service for Alpine
+  mkdir -p /etc/init.d
+  tee /etc/init.d/argus-first-boot > /dev/null << 'EOF'
+#!/sbin/openrc-run
+
+description="Argus First-Boot Bootstrap"
+depend() {
+  after network-online tailscale
+}
+
+start() {
+  ebegin "Starting Argus first-boot"
+  /usr/local/lib/argus/first-boot.sh
+  eend $?
+}
+EOF
+  chmod +x /etc/init.d/argus-first-boot
+
+  # Enable service
+  if command -v rc-update &>/dev/null; then
+    rc-update add argus-first-boot default 2>/dev/null || true
+    echo "First-boot automation configured"
+
+    # Try to start if OpenRC is running
+    if rc-service argus-first-boot start 2>/dev/null; then
+      echo "First-boot service started"
+    else
+      echo "Will start on next boot"
+    fi
+  fi
+else
+  # systemd service for Debian/Ubuntu
+  mkdir -p /etc/systemd/system
+  tee /etc/systemd/system/argus-first-boot.service > /dev/null << 'EOF'
 [Unit]
 Description=Argus First-Boot Bootstrap
 After=network-online.target tailscaled.service
@@ -177,34 +223,41 @@ SyslogIdentifier=argus-first-boot
 WantedBy=multi-user.target
 EOF
 
-# Enable and reload systemd (if running)
-if systemctl is-system-running 2>/dev/null; then
-  systemctl daemon-reload
-  systemctl enable argus-first-boot.service
-  echo "First-boot automation configured and enabled"
-else
-  echo "First-boot automation configured (systemd not running, will enable on next boot)"
+  # Enable and reload systemd (if running)
+  if systemctl is-system-running 2>/dev/null; then
+    systemctl daemon-reload
+    systemctl enable argus-first-boot.service
+    echo "First-boot automation configured and enabled"
+  else
+    echo "First-boot automation configured (systemd not running, will enable on next boot)"
+  fi
 fi
+
 echo
 
 # Summary
 echo "[4/5] Configuration complete"
 echo
 echo "=== Bootstrap Summary ==="
+echo "Distribution: $DISTRO"
+echo "Init System: $([ "$DISTRO" = "alpine" ] && echo "OpenRC" || echo "systemd")"
 echo "Hostname: $HOSTNAME_PREFIX-{random}"
 echo "Mothership: $MOTHERSHIP_ADDR"
 echo "Status: Ready to bootstrap"
 echo
 
-# Start first-boot (if systemd is running)
+# Start first-boot
 echo "[5/5] Starting bootstrap..."
-if systemctl is-system-running 2>/dev/null; then
-  systemctl start argus-first-boot.service &
-  echo "First-boot service started"
-  echo "Check status with: journalctl -u argus-first-boot -f"
+if [[ "$DISTRO" == "alpine" ]]; then
+  echo "Alpine: Will start on next boot (or run: rc-service argus-first-boot start)"
 else
-  echo "Systemd not running. Service will start on next boot."
-  echo "To start now manually: systemctl start argus-first-boot.service"
+  if systemctl is-system-running 2>/dev/null; then
+    systemctl start argus-first-boot.service &
+    echo "First-boot service started"
+    echo "Check status with: journalctl -u argus-first-boot -f"
+  else
+    echo "Systemd not running. Service will start on next boot."
+  fi
 fi
 
 echo
