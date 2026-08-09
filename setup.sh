@@ -18,7 +18,7 @@ echo
 # Validate environment
 echo "[1/5] Validating environment..."
 
-if [[ $EUID -ne 0 ]]; then
+if [ "$(id -u)" -ne 0 ]; then
   echo "ERROR: Must run as root or with sudo"
   exit 1
 fi
